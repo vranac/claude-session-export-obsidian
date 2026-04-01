@@ -46,6 +46,7 @@ GIT_BRANCH_DEFAULT = "HEAD"
 CUSTOM_TITLE_TYPE = "custom-title"
 SUMMARY_TYPE = "summary"
 CONFIG_FILENAME = "project-map.yaml"
+COMMAND_PREFIX = "/"
 MY_NOTES_COMMENT = "<!-- Add your notes here. This section is preserved across syncs. -->"
 
 
@@ -625,7 +626,7 @@ def generate_body(
 
     for entry in data.conversation:
         if entry.role == "user":
-            if not include_commands and entry.content.startswith("/"):
+            if not include_commands and entry.content.startswith(COMMAND_PREFIX):
                 continue
             lines.extend(["### User", "", entry.content, ""])
         elif entry.role == "assistant":
