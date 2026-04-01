@@ -134,10 +134,12 @@ projects:
     patterns:
       - "-Users-you-dev-research-*"
     include_thinking: true
+    include_commands: false
 ```
 
 Currently supported options:
 - `include_thinking` (default: `false`) — include Claude's thinking blocks as collapsible `<details>` sections
+- `include_commands` (default: `true`) — include slash command invocations (e.g., `/session-export:sync`) in the conversation output. Set to `false` to filter them out.
 
 ## Output
 

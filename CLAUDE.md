@@ -64,4 +64,5 @@ projects:
     patterns:
       - "-encoded-dir-*"
     include_thinking: true
+    include_commands: false
 ```

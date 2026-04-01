@@ -46,6 +46,7 @@ GIT_BRANCH_DEFAULT = "HEAD"
 CUSTOM_TITLE_TYPE = "custom-title"
 SUMMARY_TYPE = "summary"
 CONFIG_FILENAME = "project-map.yaml"
+COMMAND_PREFIX = "/"
 MY_NOTES_COMMENT = "<!-- Add your notes here. This section is preserved across syncs. -->"
 
 
@@ -417,8 +418,8 @@ def extract_session_data(
 ) -> SessionData:
     """Extract all session data from an iterator of JSONL records.
 
-    Always extracts thinking blocks — the decision to include thinking in
-    output is made at markdown generation time, not parse time.
+    Always extracts thinking blocks and commands — the decision to include
+    them in output is made at markdown generation time, not parse time.
     """
     data = SessionData()
 
@@ -608,6 +609,7 @@ def generate_body(
     title: str,
     my_notes: str | None = None,
     include_thinking: bool = False,
+    include_commands: bool = True,
 ) -> list[str]:
     """Generate markdown body lines (title, notes, conversation)."""
     lines = [f"# {title}", ""]
@@ -624,6 +626,8 @@ def generate_body(
 
     for entry in data.conversation:
         if entry.role == "user":
+            if not include_commands and entry.content.startswith(COMMAND_PREFIX):
+                continue
             lines.extend(["### User", "", entry.content, ""])
         elif entry.role == "assistant":
             lines.extend(["### Assistant", ""])
@@ -646,6 +650,7 @@ def generate_markdown(
     existing_fm: dict[str, typing.Any] | None = None,
     my_notes: str | None = None,
     include_thinking: bool = False,
+    include_commands: bool = True,
 ) -> str:
     """Generate full markdown content from session data."""
     fm_lines = generate_frontmatter(data, session_id, project, existing_fm)
@@ -657,7 +662,7 @@ def generate_markdown(
     if not title:
         title = data.title or "Untitled Session"
 
-    body_lines = generate_body(data, title, my_notes, include_thinking)
+    body_lines = generate_body(data, title, my_notes, include_thinking, include_commands)
 
     return "\n".join(fm_lines + [""] + body_lines)
 
@@ -799,8 +804,8 @@ def parse_session(
 ) -> SessionData | None:
     """Parse JSONL once and return SessionData, or None if not found.
 
-    Always extracts thinking blocks. The decision to include thinking in
-    markdown output is deferred to write_session_to_vault.
+    Always extracts thinking blocks and commands. The decision to include
+    them in markdown output is deferred to write_session_to_vault.
     """
     found = _find_transcript(session_id, transcript_path, index, quiet)
     if not found:
@@ -836,6 +841,7 @@ def write_session_to_vault(
     # Check per-project config
     project_config = get_project_config(config, project) if project else {}
     include_thinking = bool(project_config.get("include_thinking", False))
+    include_commands = bool(project_config.get("include_commands", True))
 
     # Find or create output file
     existing_file = index.find_export(data.session_id) if index else None
@@ -860,7 +866,8 @@ def write_session_to_vault(
     # Generate and write
     output_file.parent.mkdir(parents=True, exist_ok=True)
     markdown = generate_markdown(
-        data, data.session_id, project, existing_fm, my_notes, include_thinking
+        data, data.session_id, project, existing_fm, my_notes,
+        include_thinking, include_commands,
     )
 
     try:
