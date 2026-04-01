@@ -1,0 +1,17 @@
+{
+  "name": "claude-session-export-obsidian",
+  "description": "Export Claude Code sessions to Obsidian markdown with full conversation, project detection, and frontmatter",
+  "version": "1.0.0",
+  "author": {
+    "name": "Srdjan Vranac",
+    "email": "claude-session-export@vranac.io"
+  },
+  "userConfig": {
+    "vault_dir": {
+      "title": "Obsidian Vault Path",
+      "description": "Path to your Obsidian vault (e.g., /Users/you/obsidian-vault)",
+      "type": "directory",
+      "sensitive": false
+    }
+  }
+}

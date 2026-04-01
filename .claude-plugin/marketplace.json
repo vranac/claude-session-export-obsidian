@@ -1,0 +1,14 @@
+{
+  "name": "claude-session-export-obsidian",
+  "owner": {
+    "name": "Srdjan Vranac",
+    "email": "claude-session-export@vranac.io"
+  },
+  "plugins": [
+    {
+      "name": "claude-session-export-obsidian",
+      "description": "Export Claude Code sessions to Obsidian markdown with full conversation, project detection, and frontmatter",
+      "source": "./"
+    }
+  ]
+}
