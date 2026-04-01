@@ -414,17 +414,11 @@ def parse_iso_date(timestamp: str) -> str:
 
 def extract_session_data(
     records: typing.Iterator[dict[str, typing.Any]],
-    include_commands: bool = True,
 ) -> SessionData:
     """Extract all session data from an iterator of JSONL records.
 
-    Always extracts thinking blocks — the decision to include thinking in
-    output is made at markdown generation time, not parse time.
-
-    Args:
-        records: Iterator of parsed JSONL records.
-        include_commands: When False, skip user messages whose cleaned
-            content starts with ``/`` (slash commands).
+    Always extracts thinking blocks and commands — the decision to include
+    them in output is made at markdown generation time, not parse time.
     """
     data = SessionData()
 
@@ -465,8 +459,6 @@ def extract_session_data(
             content = msg.get("content", "")
             cleaned = clean_user_message(content)
             if cleaned:
-                if not include_commands and cleaned.startswith("/"):
-                    continue
                 data.conversation.append(ConversationEntry(role="user", content=cleaned))
 
         # Assistant messages — always extract thinking
@@ -616,6 +608,7 @@ def generate_body(
     title: str,
     my_notes: str | None = None,
     include_thinking: bool = False,
+    include_commands: bool = True,
 ) -> list[str]:
     """Generate markdown body lines (title, notes, conversation)."""
     lines = [f"# {title}", ""]
@@ -632,6 +625,8 @@ def generate_body(
 
     for entry in data.conversation:
         if entry.role == "user":
+            if not include_commands and entry.content.startswith("/"):
+                continue
             lines.extend(["### User", "", entry.content, ""])
         elif entry.role == "assistant":
             lines.extend(["### Assistant", ""])
@@ -654,6 +649,7 @@ def generate_markdown(
     existing_fm: dict[str, typing.Any] | None = None,
     my_notes: str | None = None,
     include_thinking: bool = False,
+    include_commands: bool = True,
 ) -> str:
     """Generate full markdown content from session data."""
     fm_lines = generate_frontmatter(data, session_id, project, existing_fm)
@@ -665,7 +661,7 @@ def generate_markdown(
     if not title:
         title = data.title or "Untitled Session"
 
-    body_lines = generate_body(data, title, my_notes, include_thinking)
+    body_lines = generate_body(data, title, my_notes, include_thinking, include_commands)
 
     return "\n".join(fm_lines + [""] + body_lines)
 
@@ -804,19 +800,18 @@ def parse_session(
     transcript_path: str | None,
     index: SessionIndex | None = None,
     quiet: bool = False,
-    include_commands: bool = True,
 ) -> SessionData | None:
     """Parse JSONL once and return SessionData, or None if not found.
 
-    Always extracts thinking blocks. The decision to include thinking in
-    markdown output is deferred to write_session_to_vault.
+    Always extracts thinking blocks and commands. The decision to include
+    them in markdown output is deferred to write_session_to_vault.
     """
     found = _find_transcript(session_id, transcript_path, index, quiet)
     if not found:
         return None
 
     jsonl_path, encoded_dir = found
-    data = extract_session_data(iter_jsonl(jsonl_path), include_commands=include_commands)
+    data = extract_session_data(iter_jsonl(jsonl_path))
     data.session_id = session_id
     data.encoded_dir = encoded_dir
     return data
@@ -847,23 +842,6 @@ def write_session_to_vault(
     include_thinking = bool(project_config.get("include_thinking", False))
     include_commands = bool(project_config.get("include_commands", True))
 
-    # Filter out slash-command user messages when include_commands is False
-    if not include_commands:
-        data = SessionData(
-            session_id=data.session_id,
-            date=data.date,
-            title=data.title,
-            git_branch=data.git_branch,
-            encoded_dir=data.encoded_dir,
-            first_timestamp=data.first_timestamp,
-            last_timestamp=data.last_timestamp,
-            conversation=[
-                entry for entry in data.conversation
-                if not (entry.role == "user" and entry.content.startswith("/"))
-            ],
-            skipped_lines=data.skipped_lines,
-        )
-
     # Find or create output file
     existing_file = index.find_export(data.session_id) if index else None
     output_file = existing_file or get_output_path(
@@ -887,7 +865,8 @@ def write_session_to_vault(
     # Generate and write
     output_file.parent.mkdir(parents=True, exist_ok=True)
     markdown = generate_markdown(
-        data, data.session_id, project, existing_fm, my_notes, include_thinking
+        data, data.session_id, project, existing_fm, my_notes,
+        include_thinking, include_commands,
     )
 
     try:
