@@ -414,11 +414,17 @@ def parse_iso_date(timestamp: str) -> str:
 
 def extract_session_data(
     records: typing.Iterator[dict[str, typing.Any]],
+    include_commands: bool = True,
 ) -> SessionData:
     """Extract all session data from an iterator of JSONL records.
 
     Always extracts thinking blocks — the decision to include thinking in
     output is made at markdown generation time, not parse time.
+
+    Args:
+        records: Iterator of parsed JSONL records.
+        include_commands: When False, skip user messages whose cleaned
+            content starts with ``/`` (slash commands).
     """
     data = SessionData()
 
@@ -459,6 +465,8 @@ def extract_session_data(
             content = msg.get("content", "")
             cleaned = clean_user_message(content)
             if cleaned:
+                if not include_commands and cleaned.startswith("/"):
+                    continue
                 data.conversation.append(ConversationEntry(role="user", content=cleaned))
 
         # Assistant messages — always extract thinking
@@ -796,6 +804,7 @@ def parse_session(
     transcript_path: str | None,
     index: SessionIndex | None = None,
     quiet: bool = False,
+    include_commands: bool = True,
 ) -> SessionData | None:
     """Parse JSONL once and return SessionData, or None if not found.
 
@@ -807,7 +816,7 @@ def parse_session(
         return None
 
     jsonl_path, encoded_dir = found
-    data = extract_session_data(iter_jsonl(jsonl_path))
+    data = extract_session_data(iter_jsonl(jsonl_path), include_commands=include_commands)
     data.session_id = session_id
     data.encoded_dir = encoded_dir
     return data
@@ -836,6 +845,24 @@ def write_session_to_vault(
     # Check per-project config
     project_config = get_project_config(config, project) if project else {}
     include_thinking = bool(project_config.get("include_thinking", False))
+    include_commands = bool(project_config.get("include_commands", True))
+
+    # Filter out slash-command user messages when include_commands is False
+    if not include_commands:
+        data = SessionData(
+            session_id=data.session_id,
+            date=data.date,
+            title=data.title,
+            git_branch=data.git_branch,
+            encoded_dir=data.encoded_dir,
+            first_timestamp=data.first_timestamp,
+            last_timestamp=data.last_timestamp,
+            conversation=[
+                entry for entry in data.conversation
+                if not (entry.role == "user" and entry.content.startswith("/"))
+            ],
+            skipped_lines=data.skipped_lines,
+        )
 
     # Find or create output file
     existing_file = index.find_export(data.session_id) if index else None
