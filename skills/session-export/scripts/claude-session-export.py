@@ -406,6 +406,47 @@ def extract_thinking(record: dict[str, typing.Any]) -> str:
     return "\n\n".join(thoughts)
 
 
+def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
+    """Extract user comment from a tool rejection record.
+
+    When a user rejects a tool use with a comment, the JSONL stores it as a
+    ``type == "user"`` record where ``message.content`` is a list containing a
+    ``tool_result`` dict with ``is_error: True``. The actual comment is embedded
+    in the text between ``"the user said:\\n"`` and ``"\\n\\nNote:"``.
+
+    Returns the cleaned comment, or empty string if the record doesn't match.
+    """
+    if record.get("type") != "user":
+        return ""
+    msg = record.get("message", {})
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return ""
+
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "tool_result":
+            continue
+        if not item.get("is_error"):
+            continue
+        text = item.get("content", "")
+        if not isinstance(text, str):
+            continue
+        marker = "the user said:\n"
+        idx = text.find(marker)
+        if idx == -1:
+            continue
+        after = text[idx + len(marker):]
+        end_marker = "\n\nNote:"
+        end_idx = after.find(end_marker)
+        comment = after[:end_idx] if end_idx != -1 else after
+        comment = comment.strip()
+        if comment:
+            return comment
+    return ""
+
+
 def parse_iso_date(timestamp: str) -> str:
     """Extract YYYY-MM-DD from an ISO timestamp. Returns empty string on failure."""
     if not isinstance(timestamp, str) or "T" not in timestamp:
@@ -454,6 +495,15 @@ def extract_session_data(
             if isinstance(custom_title, str) and custom_title:
                 data.title = custom_title.split("\n")[0].strip()[:100]
 
+        # Queue operations — messages typed while Claude was processing
+        if record_type == "queue-operation":
+            if record.get("operation") == "enqueue":
+                queued_content = record.get("content", "")
+                if isinstance(queued_content, str) and queued_content.strip():
+                    cleaned = clean_user_message(queued_content)
+                    if cleaned:
+                        data.conversation.append(ConversationEntry(role="user", content=cleaned))
+
         # User messages
         if is_real_user_message(record):
             msg = record.get("message", {})
@@ -461,6 +511,11 @@ def extract_session_data(
             cleaned = clean_user_message(content)
             if cleaned:
                 data.conversation.append(ConversationEntry(role="user", content=cleaned))
+        elif record_type == "user":
+            # Check for rejection comments on tool results
+            rejection = extract_rejection_comment(record)
+            if rejection:
+                data.conversation.append(ConversationEntry(role="user", content=rejection))
 
         # Assistant messages — always extract thinking
         if record_type == "assistant":
