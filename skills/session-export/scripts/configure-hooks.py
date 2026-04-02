@@ -21,12 +21,12 @@ from pathlib import Path
 from typing import Any
 
 HOOK_MARKER = "claude-session-export"
-HOOK_EVENTS = ("PreCompact", "SessionEnd")
+HOOK_EVENTS = ("PreCompact", "SessionEnd", "SessionStart")
 
 
-def build_hook_entry(script_path: str) -> dict[str, Any]:
-    """Build a single hook matcher entry for the given script path."""
-    return {
+def build_hook_entry(script_path: str, event: str) -> dict[str, Any]:
+    """Build a single hook matcher entry for the given script path and event."""
+    entry: dict[str, Any] = {
         "hooks": [
             {
                 "type": "command",
@@ -35,6 +35,10 @@ def build_hook_entry(script_path: str) -> dict[str, Any]:
             }
         ]
     }
+    # SessionStart fires on multiple occasions — we only want it on /clear
+    if event == "SessionStart":
+        entry["matcher"] = "clear"
+    return entry
 
 
 def read_settings(settings_path: Path) -> dict[str, Any]:
@@ -91,7 +95,7 @@ def cmd_add(settings_path: Path, script_path: str) -> None:
     already_configured = True
 
     for event in HOOK_EVENTS:
-        entry = build_hook_entry(script_path)
+        entry = build_hook_entry(script_path, event)
         matchers: list[dict[str, Any]] = hooks.setdefault(event, [])
         existing_indices = find_export_hook_indices(matchers)
 

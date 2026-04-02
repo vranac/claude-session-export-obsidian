@@ -208,10 +208,11 @@ The `## My Notes` section is preserved across re-syncs for your annotations.
 
 Hooks are **not auto-registered**. You opt in via `/session-export:setup`, which adds them to your global or local settings.
 
-When enabled, the plugin syncs on two events:
+When enabled, the plugin syncs on three events:
 
 - **PreCompact** — before context compression, when conversation is at max richness
 - **SessionEnd** — when the session terminates
+- **SessionStart (clear)** — when the user runs `/clear`, exports the previous conversation before it resets. Without this, conversations cleared without compaction or session end would not be exported.
 
 No per-message syncing. The JSONL transcript is the live record; markdown export is for checkpoints and review.
 
@@ -235,6 +236,18 @@ If you prefer to add hooks manually instead of using `/session-export:setup`, ad
     ],
     "SessionEnd": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ~/.claude/plugins/marketplaces/claude-session-export-obsidian/skills/session-export/scripts/claude-session-export.py sync",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "clear",
         "hooks": [
           {
             "type": "command",
