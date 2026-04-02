@@ -328,8 +328,9 @@ def _build_map_template(output_dir: str, claude_projects: list[str]) -> str:
         "# Maps encoded Claude project directories to Obsidian project names.",
         "#",
         "# Each key under 'projects' is the name of the subfolder created in",
-        f"# $VAULT_DIR/{output_dir}/. Values are lists of encoded directory patterns",
-        "# from ~/.claude/projects/. Glob patterns (fnmatch) are supported.",
+        f"# $VAULT_DIR/{output_dir}/. Each project uses a 'patterns:' key whose value",
+        "# is a list of encoded directory patterns from ~/.claude/projects/.",
+        "# Glob patterns (fnmatch) are supported.",
         "#",
         "# Run 'configure-vault.py list-unmapped --vault-dir .' to find unmapped dirs.",
         "",
@@ -338,8 +339,9 @@ def _build_map_template(output_dir: str, claude_projects: list[str]) -> str:
         "projects:",
         "  # Example:",
         "  # my-project:",
-        "  #   - \"-Users-me-dev-my-project\"",
-        "  #   - \"-Users-me-dev-my-project-*\"",
+        "  #   patterns:",
+        "  #     - \"-Users-me-dev-my-project\"",
+        "  #     - \"-Users-me-dev-my-project-*\"",
     ]
 
     if claude_projects:
