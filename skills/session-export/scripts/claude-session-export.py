@@ -67,6 +67,7 @@ class ConversationEntry:
     role: str  # "user" or "assistant"
     content: str
     thinking: str = ""
+    label: str = ""  # "rejected", "approved", "while_processing", or "" for normal
 
 
 @dataclass
@@ -447,6 +448,44 @@ def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
     return ""
 
 
+def extract_approval_comment(record: dict[str, typing.Any]) -> str:
+    """Extract user comment from a tool approval record.
+
+    When a user approves a tool use with an added comment, the JSONL stores it
+    as a ``type == "user"`` record where ``message.content`` is a list
+    containing both a ``tool_result`` item and a separate ``text`` item with the
+    user's comment.
+
+    Only triggers when a ``tool_result`` is present in the same content array
+    (to avoid matching regular multi-part user messages).
+
+    Returns the comment text, or empty string if the record doesn't match.
+    """
+    if record.get("type") != "user":
+        return ""
+    msg = record.get("message", {})
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return ""
+
+    has_tool_result = False
+    texts: list[str] = []
+    for item in content:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "tool_result":
+            has_tool_result = True
+        elif item.get("type") == "text":
+            text = item.get("text", "")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+
+    if not has_tool_result or not texts:
+        return ""
+
+    return "\n\n".join(texts)
+
+
 def parse_iso_date(timestamp: str) -> str:
     """Extract YYYY-MM-DD from an ISO timestamp. Returns empty string on failure."""
     if not isinstance(timestamp, str) or "T" not in timestamp:
@@ -502,7 +541,7 @@ def extract_session_data(
                 if isinstance(queued_content, str) and queued_content.strip():
                     cleaned = clean_user_message(queued_content)
                     if cleaned:
-                        data.conversation.append(ConversationEntry(role="user", content=cleaned))
+                        data.conversation.append(ConversationEntry(role="user", content=cleaned, label="while_processing"))
 
         # User messages
         if is_real_user_message(record):
@@ -515,7 +554,12 @@ def extract_session_data(
             # Check for rejection comments on tool results
             rejection = extract_rejection_comment(record)
             if rejection:
-                data.conversation.append(ConversationEntry(role="user", content=rejection))
+                data.conversation.append(ConversationEntry(role="user", content=rejection, label="rejected"))
+            else:
+                # Check for approval comments alongside tool results
+                approval = extract_approval_comment(record)
+                if approval:
+                    data.conversation.append(ConversationEntry(role="user", content=approval, label="approved"))
 
         # Assistant messages — always extract thinking
         if record_type == "assistant":
@@ -705,7 +749,17 @@ def generate_body(
         if entry.role == "user":
             if not include_commands and entry.content.startswith(COMMAND_PREFIX):
                 continue
-            lines.extend(["### User", "", shift_headings(entry.content), ""])
+            lines.append("### User")
+            lines.append("")
+            if entry.label == "rejected":
+                lines.append(f"**Rejected:** {shift_headings(entry.content)}")
+            elif entry.label == "approved":
+                lines.append(f"**Approved:** {shift_headings(entry.content)}")
+            elif entry.label == "while_processing":
+                lines.append(f"**While processing:** {shift_headings(entry.content)}")
+            else:
+                lines.append(shift_headings(entry.content))
+            lines.append("")
         elif entry.role == "assistant":
             lines.extend(["### Assistant", ""])
             if include_thinking and entry.thinking:
