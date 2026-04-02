@@ -101,7 +101,7 @@ To see what directories need mapping:
 uv run ${CLAUDE_PLUGIN_ROOT}/skills/session-export/scripts/configure-vault.py list-unmapped --vault-dir "<vault-path>"
 ```
 
-If the user wants to edit, show the unmapped directories and help them update the YAML. Write the file using the Edit tool. Per-project entries that use the `patterns:` form also support `include_thinking: true` and `include_commands: true` (default: true) options.
+If the user wants to edit, show the unmapped directories and help them update the YAML. Write the file using the Edit tool. The `patterns:` format is the recommended format for all entries. It supports three config options: `include_thinking` (default: false), `include_commands` (default: true), and `include_tool_context` (default: false).
 
 ## Step 4: Shell Alias
 

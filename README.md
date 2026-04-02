@@ -106,11 +106,27 @@ output_dir: Claude-Sessions    # top-level folder name in vault (default: Claude
 
 projects:
   my-project:
-    - "-Users-you-dev-my-project"
-    - "-Users-you-dev-my-project-*"
+    patterns:
+      - "-Users-you-dev-my-project"
+      - "-Users-you-dev-my-project-*"
   another-project:
-    - "-Users-you-dev-another-project-*"
+    patterns:
+      - "-Users-you-dev-another-project-*"
 ```
+
+Each project uses a `patterns:` key containing a list of encoded directory names to match. Per-project options can be added alongside `patterns:`:
+
+```yaml
+projects:
+  research-project:
+    patterns:
+      - "-Users-you-dev-research-*"
+    include_thinking: true
+    include_commands: false
+    include_tool_context: true
+```
+
+A shorthand list format (without the `patterns:` key) is also supported but cannot include per-project options.
 
 Matching rules:
 - Exact match first (highest priority)
@@ -124,24 +140,11 @@ To find your encoded directory names:
 ls ~/.claude/projects/
 ```
 
-#### Per-project config
+#### Per-project options
 
-Use dict format to add per-project options:
-
-```yaml
-projects:
-  research-project:
-    patterns:
-      - "-Users-you-dev-research-*"
-    include_thinking: true
-    include_commands: false
-    include_tool_context: true
-```
-
-Currently supported options:
-- `include_thinking` (default: `false`) — include Claude's thinking blocks as collapsible `<details>` sections
+- `include_thinking` (default: `false`) — include Claude's thinking blocks as collapsible Obsidian callouts
 - `include_commands` (default: `true`) — include slash command invocations (e.g., `/session-export:sync`) in the conversation output. Set to `false` to filter them out.
-- `include_tool_context` (default: `false`) — when a user rejects or approves a tool use with a comment, show the proposed change (edit diff, file content, bash command) in a collapsible `<details>` block alongside the comment. Useful for reviewing what was rejected/approved. Off by default as it can significantly increase file size.
+- `include_tool_context` (default: `false`) — when a user rejects or approves a tool use with a comment, show the proposed change (edit diff, file content, bash command) in a collapsible Obsidian callout alongside the comment. Useful for reviewing what was rejected/approved. Off by default as it can significantly increase file size.
 
 ## Output
 

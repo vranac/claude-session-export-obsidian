@@ -58,8 +58,9 @@ output_dir: Claude-Sessions    # configurable top-level folder name
 
 projects:
   project-name:
-    - "-encoded-dir-exact"
-    - "-encoded-dir-glob-*"
+    patterns:
+      - "-encoded-dir-exact"
+      - "-encoded-dir-glob-*"
   project-with-config:
     patterns:
       - "-encoded-dir-*"
