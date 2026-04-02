@@ -604,15 +604,15 @@ def generate_frontmatter(
     return lines
 
 
-def shift_headings(content: str, levels: int = 3) -> str:
-    """Shift all markdown headings down by *levels*, capping at H6.
+_HEADING_RE = re.compile(r"^(#{1,6})([^#])", re.MULTILINE)
 
-    Only lines that start with ``#`` (ATX headings) are affected.
-    Uses a single ``re.sub`` with ``re.MULTILINE`` for performance.
+
+def shift_headings(content: str, levels: int = 3) -> str:
+    """Shift all markdown ATX headings down by ``levels``, capping at H6.
 
     Args:
         content: Markdown text whose headings should be shifted.
-        levels: Number of heading levels to add (default 3).
+        levels: Number of heading levels to add.
 
     Returns:
         The content with all headings shifted down, capped at H6.
@@ -623,7 +623,7 @@ def shift_headings(content: str, levels: int = 3) -> str:
         new_level = min(current + levels, 6)
         return "#" * new_level + match.group(2)
 
-    return re.sub(r"^(#{1,6})([^#])", _shift, content, flags=re.MULTILINE)
+    return _HEADING_RE.sub(_shift, content)
 
 
 def generate_body(
