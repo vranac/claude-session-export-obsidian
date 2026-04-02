@@ -65,4 +65,5 @@ projects:
       - "-encoded-dir-*"
     include_thinking: true
     include_commands: false
+    include_tool_context: true
 ```

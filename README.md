@@ -135,11 +135,13 @@ projects:
       - "-Users-you-dev-research-*"
     include_thinking: true
     include_commands: false
+    include_tool_context: true
 ```
 
 Currently supported options:
 - `include_thinking` (default: `false`) — include Claude's thinking blocks as collapsible `<details>` sections
 - `include_commands` (default: `true`) — include slash command invocations (e.g., `/session-export:sync`) in the conversation output. Set to `false` to filter them out.
+- `include_tool_context` (default: `false`) — when a user rejects or approves a tool use with a comment, show the proposed change (edit diff, file content, bash command) in a collapsible `<details>` block alongside the comment. Useful for reviewing what was rejected/approved. Off by default as it can significantly increase file size.
 
 ## Output
 

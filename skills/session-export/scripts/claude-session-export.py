@@ -68,6 +68,8 @@ class ConversationEntry:
     content: str
     thinking: str = ""
     label: str = ""  # "rejected", "approved", "while_processing", or "" for normal
+    tool_context: str = ""
+    tool_summary: str = ""  # e.g. "Edit path/to/file.py" or "Bash"
 
 
 @dataclass
@@ -80,6 +82,7 @@ class SessionData:
     first_timestamp: str = ""
     last_timestamp: str = ""
     conversation: list[ConversationEntry] = field(default_factory=list)
+    tool_use_index: dict[str, dict[str, typing.Any]] = field(default_factory=dict)
     skipped_lines: int = 0
 
 
@@ -407,7 +410,7 @@ def extract_thinking(record: dict[str, typing.Any]) -> str:
     return "\n\n".join(thoughts)
 
 
-def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
+def extract_rejection_comment(record: dict[str, typing.Any]) -> tuple[str, str]:
     """Extract user comment from a tool rejection record.
 
     When a user rejects a tool use with a comment, the JSONL stores it as a
@@ -415,14 +418,14 @@ def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
     ``tool_result`` dict with ``is_error: True``. The actual comment is embedded
     in the text between ``"the user said:\\n"`` and ``"\\n\\nNote:"``.
 
-    Returns the cleaned comment, or empty string if the record doesn't match.
+    Returns (comment_text, tool_use_id). Both empty strings if no match.
     """
     if record.get("type") != "user":
-        return ""
+        return "", ""
     msg = record.get("message", {})
     content = msg.get("content")
     if not isinstance(content, list):
-        return ""
+        return "", ""
 
     for item in content:
         if not isinstance(item, dict):
@@ -431,6 +434,7 @@ def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
             continue
         if not item.get("is_error"):
             continue
+        tool_use_id = item.get("tool_use_id", "")
         text = item.get("content", "")
         if not isinstance(text, str):
             continue
@@ -444,11 +448,11 @@ def extract_rejection_comment(record: dict[str, typing.Any]) -> str:
         comment = after[:end_idx] if end_idx != -1 else after
         comment = comment.strip()
         if comment:
-            return comment
-    return ""
+            return comment, tool_use_id
+    return "", ""
 
 
-def extract_approval_comment(record: dict[str, typing.Any]) -> str:
+def extract_approval_comment(record: dict[str, typing.Any]) -> tuple[str, str]:
     """Extract user comment from a tool approval record.
 
     When a user approves a tool use with an added comment, the JSONL stores it
@@ -459,15 +463,16 @@ def extract_approval_comment(record: dict[str, typing.Any]) -> str:
     Only triggers when a ``tool_result`` is present in the same content array
     (to avoid matching regular multi-part user messages).
 
-    Returns the comment text, or empty string if the record doesn't match.
+    Returns (comment_text, tool_use_id). Both empty strings if no match.
     """
     if record.get("type") != "user":
-        return ""
+        return "", ""
     msg = record.get("message", {})
     content = msg.get("content")
     if not isinstance(content, list):
-        return ""
+        return "", ""
 
+    tool_use_id = ""
     has_tool_result = False
     texts: list[str] = []
     for item in content:
@@ -475,15 +480,16 @@ def extract_approval_comment(record: dict[str, typing.Any]) -> str:
             continue
         if item.get("type") == "tool_result":
             has_tool_result = True
+            tool_use_id = item.get("tool_use_id", "")
         elif item.get("type") == "text":
             text = item.get("text", "")
             if isinstance(text, str) and text.strip():
                 texts.append(text.strip())
 
     if not has_tool_result or not texts:
-        return ""
+        return "", ""
 
-    return "\n\n".join(texts)
+    return "\n\n".join(texts), tool_use_id
 
 
 def parse_iso_date(timestamp: str) -> str:
@@ -491,6 +497,78 @@ def parse_iso_date(timestamp: str) -> str:
     if not isinstance(timestamp, str) or "T" not in timestamp:
         return ""
     return timestamp.split("T")[0]
+
+
+def _index_tool_uses(record: dict[str, typing.Any], index: dict[str, dict[str, typing.Any]]) -> None:
+    """Index tool_use blocks from an assistant record for later correlation."""
+    msg = record.get("message", {})
+    contents = msg.get("content", [])
+    if not isinstance(contents, list):
+        return
+
+    for item in contents:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        tool_use_id = item.get("id", "")
+        if not tool_use_id:
+            continue
+        tool_name = item.get("name", "")
+        tool_input = item.get("input", {})
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+
+        if tool_name in ("Edit", "Write", "Read"):
+            summary = f"{tool_name} {tool_input.get('file_path', '')}"
+        elif tool_name == "Bash":
+            summary = tool_name
+        else:
+            summary = tool_name
+
+        index[tool_use_id] = {"summary": summary, "input": tool_input, "tool_name": tool_name}
+
+
+def _format_tool_context(tool_use_id: str, tool_use_index: dict[str, dict[str, typing.Any]]) -> str:
+    """Format tool context string from the tool_use_index for a given tool_use_id."""
+    if not tool_use_id or tool_use_id not in tool_use_index:
+        return ""
+
+    entry = tool_use_index[tool_use_id]
+    tool_name = entry.get("tool_name", "")
+    tool_input = entry.get("input", {})
+
+    def _indent_for_callout(text: str) -> str:
+        """Prefix every line with '> ' for Obsidian callout blocks."""
+        return "\n".join(f"> {line}" for line in text.split("\n"))
+
+    if tool_name == "Edit":
+        file_path = tool_input.get("file_path", "")
+        old_string = tool_input.get("old_string", "")
+        new_string = tool_input.get("new_string", "")
+        parts = [f"**File:** `{file_path}`", ""]
+        if old_string:
+            parts.extend(["**Old:**", "```", old_string, "```", ""])
+        if new_string:
+            parts.extend(["**New:**", "```", new_string, "```"])
+        return _indent_for_callout("\n".join(parts))
+
+    if tool_name == "Write":
+        file_path = tool_input.get("file_path", "")
+        content = tool_input.get("content", "")
+        raw_lines = content.split("\n")
+        truncated = "\n".join(raw_lines[:50])
+        suffix = f"\n... ({len(raw_lines) - 50} more lines)" if len(raw_lines) > 50 else ""
+        return _indent_for_callout(f"**File:** `{file_path}`\n\n```\n{truncated}{suffix}\n```")
+
+    if tool_name == "Bash":
+        command = tool_input.get("command", "")
+        return _indent_for_callout(f"```bash\n{command}\n```")
+
+    # Other tools: show name and input as JSON
+    try:
+        input_json = json.dumps(tool_input, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError):
+        input_json = str(tool_input)
+    return _indent_for_callout(f"**{tool_name}**\n\n```json\n{input_json}\n```")
 
 
 def extract_session_data(
@@ -543,6 +621,10 @@ def extract_session_data(
                     if cleaned:
                         data.conversation.append(ConversationEntry(role="user", content=cleaned, label="while_processing"))
 
+        # Index tool_use blocks from assistant records
+        if record_type == "assistant":
+            _index_tool_uses(record, data.tool_use_index)
+
         # User messages
         if is_real_user_message(record):
             msg = record.get("message", {})
@@ -552,14 +634,24 @@ def extract_session_data(
                 data.conversation.append(ConversationEntry(role="user", content=cleaned))
         elif record_type == "user":
             # Check for rejection comments on tool results
-            rejection = extract_rejection_comment(record)
+            rejection, reject_tool_id = extract_rejection_comment(record)
             if rejection:
-                data.conversation.append(ConversationEntry(role="user", content=rejection, label="rejected"))
+                tool_context = _format_tool_context(reject_tool_id, data.tool_use_index)
+                tool_summary = data.tool_use_index.get(reject_tool_id, {}).get("summary", "")
+                data.conversation.append(ConversationEntry(
+                    role="user", content=rejection, label="rejected",
+                    tool_context=tool_context, tool_summary=tool_summary,
+                ))
             else:
                 # Check for approval comments alongside tool results
-                approval = extract_approval_comment(record)
+                approval, approve_tool_id = extract_approval_comment(record)
                 if approval:
-                    data.conversation.append(ConversationEntry(role="user", content=approval, label="approved"))
+                    tool_context = _format_tool_context(approve_tool_id, data.tool_use_index)
+                    tool_summary = data.tool_use_index.get(approve_tool_id, {}).get("summary", "")
+                    data.conversation.append(ConversationEntry(
+                        role="user", content=approval, label="approved",
+                        tool_context=tool_context, tool_summary=tool_summary,
+                    ))
 
         # Assistant messages — always extract thinking
         if record_type == "assistant":
@@ -731,6 +823,7 @@ def generate_body(
     my_notes: str | None = None,
     include_thinking: bool = False,
     include_commands: bool = True,
+    include_tool_context: bool = False,
 ) -> list[str]:
     """Generate markdown body lines (title, notes, conversation)."""
     lines = [f"# {title}", ""]
@@ -751,10 +844,21 @@ def generate_body(
                 continue
             lines.append("### User")
             lines.append("")
-            if entry.label == "rejected":
-                lines.append(f"**Rejected:** {shift_headings(entry.content)}")
-            elif entry.label == "approved":
-                lines.append(f"**Approved:** {shift_headings(entry.content)}")
+            if entry.label in ("rejected", "approved"):
+                label_text = entry.label.capitalize()
+                if include_tool_context and entry.tool_context:
+                    if entry.tool_summary:
+                        lines.append(f"**{label_text}** `{entry.tool_summary}`:")
+                    else:
+                        lines.append(f"**{label_text}:**")
+                    lines.append("")
+                    lines.append(f"> [!info]- Proposed change")
+                    lines.append(entry.tool_context)
+                    lines.append("")
+                    if entry.content:
+                        lines.append(shift_headings(entry.content))
+                else:
+                    lines.append(f"**{label_text}:** {shift_headings(entry.content)}")
             elif entry.label == "while_processing":
                 lines.append(f"**While processing:** {shift_headings(entry.content)}")
             else:
@@ -763,10 +867,10 @@ def generate_body(
         elif entry.role == "assistant":
             lines.extend(["### Assistant", ""])
             if include_thinking and entry.thinking:
+                thinking_lines = "\n".join(f"> {l}" for l in entry.thinking.split("\n"))
                 lines.extend([
-                    "<details><summary>Thinking</summary>", "",
-                    entry.thinking, "",
-                    "</details>", "",
+                    "> [!tip]- Thinking",
+                    thinking_lines, "",
                 ])
             if entry.content:
                 lines.extend([shift_headings(entry.content), ""])
@@ -782,6 +886,7 @@ def generate_markdown(
     my_notes: str | None = None,
     include_thinking: bool = False,
     include_commands: bool = True,
+    include_tool_context: bool = False,
 ) -> str:
     """Generate full markdown content from session data."""
     fm_lines = generate_frontmatter(data, session_id, project, existing_fm)
@@ -793,7 +898,7 @@ def generate_markdown(
     if not title:
         title = data.title or "Untitled Session"
 
-    body_lines = generate_body(data, title, my_notes, include_thinking, include_commands)
+    body_lines = generate_body(data, title, my_notes, include_thinking, include_commands, include_tool_context)
 
     return "\n".join(fm_lines + [""] + body_lines)
 
@@ -973,6 +1078,7 @@ def write_session_to_vault(
     project_config = get_project_config(config, project) if project else {}
     include_thinking = bool(project_config.get("include_thinking", False))
     include_commands = bool(project_config.get("include_commands", True))
+    include_tool_context = bool(project_config.get("include_tool_context", False))
 
     # Find or create output file
     existing_file = index.find_export(data.session_id) if index else None
@@ -998,7 +1104,7 @@ def write_session_to_vault(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     markdown = generate_markdown(
         data, data.session_id, project, existing_fm, my_notes,
-        include_thinking, include_commands,
+        include_thinking, include_commands, include_tool_context,
     )
 
     try:
