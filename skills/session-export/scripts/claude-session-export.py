@@ -604,6 +604,28 @@ def generate_frontmatter(
     return lines
 
 
+def shift_headings(content: str, levels: int = 3) -> str:
+    """Shift all markdown headings down by *levels*, capping at H6.
+
+    Only lines that start with ``#`` (ATX headings) are affected.
+    Uses a single ``re.sub`` with ``re.MULTILINE`` for performance.
+
+    Args:
+        content: Markdown text whose headings should be shifted.
+        levels: Number of heading levels to add (default 3).
+
+    Returns:
+        The content with all headings shifted down, capped at H6.
+    """
+
+    def _shift(match: re.Match[str]) -> str:
+        current = len(match.group(1))
+        new_level = min(current + levels, 6)
+        return "#" * new_level + match.group(2)
+
+    return re.sub(r"^(#{1,6})([^#])", _shift, content, flags=re.MULTILINE)
+
+
 def generate_body(
     data: SessionData,
     title: str,
@@ -628,7 +650,7 @@ def generate_body(
         if entry.role == "user":
             if not include_commands and entry.content.startswith(COMMAND_PREFIX):
                 continue
-            lines.extend(["### User", "", entry.content, ""])
+            lines.extend(["### User", "", shift_headings(entry.content), ""])
         elif entry.role == "assistant":
             lines.extend(["### Assistant", ""])
             if include_thinking and entry.thinking:
@@ -638,7 +660,7 @@ def generate_body(
                     "</details>", "",
                 ])
             if entry.content:
-                lines.extend([entry.content, ""])
+                lines.extend([shift_headings(entry.content), ""])
 
     return lines
 
