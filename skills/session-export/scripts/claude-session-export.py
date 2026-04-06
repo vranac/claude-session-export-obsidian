@@ -506,7 +506,8 @@ def format_timestamp_utc(timestamp: str) -> str:
         return ""
     try:
         dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m-%d %H:%M UTC")
+        dt_utc = dt.astimezone(timezone.utc)
+        return dt_utc.strftime("%Y-%m-%d %H:%M UTC")
     except (ValueError, TypeError):
         return ""
 
@@ -853,11 +854,14 @@ def generate_body(
     # Conversation
     lines.extend(["## Conversation", ""])
 
+    ts_failures = 0
     for entry in data.conversation:
         if entry.role == "user":
             if not include_commands and entry.content.startswith(COMMAND_PREFIX):
                 continue
             ts = format_timestamp_utc(entry.timestamp)
+            if entry.timestamp and not ts:
+                ts_failures += 1
             heading = f"### User — {ts}" if ts else "### User"
             lines.append(heading)
             lines.append("")
@@ -883,6 +887,8 @@ def generate_body(
             lines.append("")
         elif entry.role == "assistant":
             ts = format_timestamp_utc(entry.timestamp)
+            if entry.timestamp and not ts:
+                ts_failures += 1
             heading = f"### Assistant — {ts}" if ts else "### Assistant"
             lines.extend([heading, ""])
             if include_thinking and entry.thinking:
@@ -893,6 +899,13 @@ def generate_body(
                 ])
             if entry.content:
                 lines.extend([shift_headings(entry.content), ""])
+
+    if ts_failures:
+        print(
+            f"[session-export] WARN: {ts_failures} timestamp(s) failed to parse",
+            file=sys.stderr,
+            flush=True,
+        )
 
     return lines
 
