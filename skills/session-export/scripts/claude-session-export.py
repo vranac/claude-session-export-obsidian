@@ -70,6 +70,7 @@ class ConversationEntry:
     label: str = ""  # "rejected", "approved", "while_processing", or "" for normal
     tool_context: str = ""
     tool_summary: str = ""  # e.g. "Edit path/to/file.py" or "Bash"
+    timestamp: str = ""  # ISO 8601 from JSONL record
 
 
 @dataclass
@@ -499,6 +500,17 @@ def parse_iso_date(timestamp: str) -> str:
     return timestamp.split("T")[0]
 
 
+def format_timestamp_utc(timestamp: str) -> str:
+    """Format an ISO timestamp as 'YYYY-MM-DD HH:MM UTC'. Returns empty string on failure."""
+    if not isinstance(timestamp, str) or not timestamp:
+        return ""
+    try:
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M UTC")
+    except (ValueError, TypeError):
+        return ""
+
+
 def _index_tool_uses(record: dict[str, typing.Any], index: dict[str, dict[str, typing.Any]]) -> None:
     """Index tool_use blocks from an assistant record for later correlation."""
     msg = record.get("message", {})
@@ -619,7 +631,7 @@ def extract_session_data(
                 if isinstance(queued_content, str) and queued_content.strip():
                     cleaned = clean_user_message(queued_content)
                     if cleaned:
-                        data.conversation.append(ConversationEntry(role="user", content=cleaned, label="while_processing"))
+                        data.conversation.append(ConversationEntry(role="user", content=cleaned, label="while_processing", timestamp=timestamp))
 
         # Index tool_use blocks from assistant records
         if record_type == "assistant":
@@ -631,7 +643,7 @@ def extract_session_data(
             content = msg.get("content", "")
             cleaned = clean_user_message(content)
             if cleaned:
-                data.conversation.append(ConversationEntry(role="user", content=cleaned))
+                data.conversation.append(ConversationEntry(role="user", content=cleaned, timestamp=timestamp))
         elif record_type == "user":
             # Check for rejection comments on tool results
             rejection, reject_tool_id = extract_rejection_comment(record)
@@ -641,6 +653,7 @@ def extract_session_data(
                 data.conversation.append(ConversationEntry(
                     role="user", content=rejection, label="rejected",
                     tool_context=tool_context, tool_summary=tool_summary,
+                    timestamp=timestamp,
                 ))
             else:
                 # Check for approval comments alongside tool results
@@ -651,6 +664,7 @@ def extract_session_data(
                     data.conversation.append(ConversationEntry(
                         role="user", content=approval, label="approved",
                         tool_context=tool_context, tool_summary=tool_summary,
+                        timestamp=timestamp,
                     ))
 
         # Assistant messages — always extract thinking
@@ -660,7 +674,8 @@ def extract_session_data(
 
             if text or thinking:
                 data.conversation.append(ConversationEntry(
-                    role="assistant", content=text, thinking=thinking
+                    role="assistant", content=text, thinking=thinking,
+                    timestamp=timestamp,
                 ))
 
     # Title fallback
@@ -842,7 +857,9 @@ def generate_body(
         if entry.role == "user":
             if not include_commands and entry.content.startswith(COMMAND_PREFIX):
                 continue
-            lines.append("### User")
+            ts = format_timestamp_utc(entry.timestamp)
+            heading = f"### User — {ts}" if ts else "### User"
+            lines.append(heading)
             lines.append("")
             if entry.label in ("rejected", "approved"):
                 label_text = entry.label.capitalize()
@@ -865,7 +882,9 @@ def generate_body(
                 lines.append(shift_headings(entry.content))
             lines.append("")
         elif entry.role == "assistant":
-            lines.extend(["### Assistant", ""])
+            ts = format_timestamp_utc(entry.timestamp)
+            heading = f"### Assistant — {ts}" if ts else "### Assistant"
+            lines.extend([heading, ""])
             if include_thinking and entry.thinking:
                 thinking_lines = "\n".join(f"> {l}" for l in entry.thinking.split("\n"))
                 lines.extend([
